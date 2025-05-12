@@ -18,7 +18,7 @@ print(f"Analyzing week: {week_str}")
 DATA_FOLDER = f'./ad_data/{year_str}/{month_str}/'
 
 # Build file paths dynamically
-fb_file = f"{DATA_FOLDER}/298049981597293-Ad-sets_{week_str}.csv"
+fb_file = f"{DATA_FOLDER}/298049981597293-Ads_{week_str}.csv"
 sales_file = f"{DATA_FOLDER}/KDP_Royalties_Estimator_{week_str}.xlsx"
 
 # Amazon Attribution file pattern (wildcard match)
