@@ -89,6 +89,10 @@ for start_date_input, end_date_input in analysis_ranges:
 
     mapping_data = pd.read_csv(mapping_file)
 
+    # Convert Book1-Book4 into a 'books' list per row
+    mapping_data['books'] = mapping_data[['Book1', 'Book2', 'Book3', 'Book4']].values.tolist()
+    mapping_data['books'] = mapping_data['books'].apply(lambda x: [b for b in x if pd.notna(b)])
+
     # Process Amazon Attribution data per Ad group
     attr_data_list = []
     for file in attr_files:
@@ -143,6 +147,34 @@ for start_date_input, end_date_input in analysis_ranges:
     attr_kenp_royalties = attr_mapped['Estimated KENP royalties'].sum()
 
     # Load and process Amazon Sales data
+    # Load Combined Sales sheet to track sales per book
+    combined_sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
+    combined_sales_data['Royalty Date'] = pd.to_datetime(combined_sales_data['Royalty Date'], errors='coerce')
+    weekly_book_sales = combined_sales_data[(combined_sales_data['Royalty Date'] >= start_date) & (combined_sales_data['Royalty Date'] <= end_date)]
+
+    # Aggregate sales per book for the week
+    book_sales_summary = weekly_book_sales.groupby('Title').agg({'Net Units Sold': 'sum', 'Royalty': 'sum'}).reset_index()
+
+    print('Weekly book sales summary:')
+
+    # For each ad, sum up sales for linked books
+    ad_book_sales = []
+    for _, row in mapping_data.iterrows():
+        ad_name = row['Ad Name (FB)']
+        linked_books = row['books']
+
+        sales_for_ad = book_sales_summary[book_sales_summary['Title'].apply(lambda t: any(book in str(t) for book in linked_books))].agg({'Net Units Sold': 'sum', 'Royalty': 'sum'}).fillna(0)
+
+        ad_book_sales.append({
+            'Ad Name (FB)': ad_name,
+            'Total Linked Book Units Sold': sales_for_ad['Net Units Sold'],
+            'Total Linked Book Royalty': sales_for_ad['Royalty']
+        })
+
+    ad_book_sales_df = pd.DataFrame(ad_book_sales)
+    print('Weekly Ad-Book Sales Summary:')
+    print(ad_book_sales_df)
+    print(book_sales_summary)
     sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
     sales_data['Royalty Date'] = pd.to_datetime(sales_data['Royalty Date'], errors='coerce')
     sales_data = sales_data[(sales_data['Royalty Date'] >= start_date) & (sales_data['Royalty Date'] <= end_date)]
