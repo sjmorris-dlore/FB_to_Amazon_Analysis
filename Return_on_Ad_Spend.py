@@ -272,7 +272,30 @@ for start_date_input, end_date_input in analysis_ranges:
         'ROAS_Blended': roas_blended
     }])
 
-    # Save to Excel (append or create)
+    # Correlation analysis after processing all date ranges
+if os.path.exists(correlation_file):
+    corr_data = pd.read_excel(correlation_file)
+
+    correlations = []
+    for ad_name, group in corr_data.groupby('Ad Name (FB)'):
+        if group['Click-throughs'].nunique() > 1 and group['Total Linked Book Units Sold'].nunique() > 1:
+            corr_value = group['Click-throughs'].corr(group['Total Linked Book Units Sold'])
+        else:
+            corr_value = None  # Not enough variation for correlation
+
+        correlations.append({
+            'Ad Name (FB)': ad_name,
+            'Correlation Clicks vs Sales': corr_value,
+            'Weeks of Data': group['Week'].nunique()
+        })
+
+    correlations_df = pd.DataFrame(correlations)
+    with pd.ExcelWriter(correlation_file, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+        correlations_df.to_excel(writer, sheet_name='Correlations', index=False)
+
+    print(f"Correlation analysis saved to {correlation_file}")
+
+# Save to Excel (append or create)
     output_file = './Weekly_Ad_Performance_Tracker.xlsx'
     try:
         existing = pd.read_excel(output_file)
