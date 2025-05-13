@@ -16,6 +16,10 @@ analysis_ranges = [
 ]
 
 # Clean out old Per_Ad_Performance_Tracker data
+correlation_file = './Ad_Book_Correlation_Tracker.xlsx'
+if os.path.exists(correlation_file):
+    os.remove(correlation_file)
+    print(f"Deleted old {correlation_file} to start fresh.")
 per_ad_output_file = './Per_Ad_Performance_Tracker.xlsx'
 if os.path.exists(per_ad_output_file):
     os.remove(per_ad_output_file)
@@ -172,7 +176,25 @@ for start_date_input, end_date_input in analysis_ranges:
         })
 
     ad_book_sales_df = pd.DataFrame(ad_book_sales)
+
+    # Filter out ads with zero linked book units sold
+    ad_book_sales_df = ad_book_sales_df[ad_book_sales_df['Total Linked Book Units Sold'] > 0]
     print('Weekly Ad-Book Sales Summary:')
+
+    # Build correlation dataset entry for this week
+    ad_book_sales_df['Week'] = f"{start_date.date()} to {end_date.date()}"
+    ad_book_sales_df['Click-throughs'] = ad_book_sales_df['Ad Name (FB)'].map(attr_per_ad.set_index('Ad Name (FB)')['Click-throughs']).fillna(0)
+
+    # Append to correlation dataset
+    correlation_file = './Ad_Book_Correlation_Tracker.xlsx'
+    try:
+        existing_corr = pd.read_excel(correlation_file)
+        ad_book_combined = pd.concat([existing_corr, ad_book_sales_df], ignore_index=True)
+    except FileNotFoundError:
+        ad_book_combined = ad_book_sales_df
+
+    ad_book_combined.to_excel(correlation_file, index=False)
+    print(f"Ad-Book correlation data saved to {correlation_file}")
     print(ad_book_sales_df)
     print(book_sales_summary)
     sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
