@@ -183,7 +183,7 @@ for start_date_input, end_date_input in analysis_ranges:
 
     # Build correlation dataset entry for this week
     ad_book_sales_df['Week'] = f"{start_date.date()} to {end_date.date()}"
-    ad_book_sales_df['Click-throughs'] = ad_book_sales_df['Ad Name (FB)'].map(attr_per_ad.set_index('Ad Name (FB)')['Click-throughs']).fillna(0)
+    ad_book_sales_df['Click-throughs'] = ad_book_sales_df['Ad Name (FB)'].map(fb_data.set_index('Ad name')['Results']).fillna(0)
 
     # Append to correlation dataset
     correlation_file = './Ad_Book_Correlation_Tracker.xlsx'
