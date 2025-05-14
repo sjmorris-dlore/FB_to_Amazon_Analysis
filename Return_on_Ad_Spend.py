@@ -2,8 +2,10 @@ import pandas as pd
 import os
 import glob
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-kenp_book_sales_multiplier = 1.97  # Example: treat each KENP book read as half a sale
+kenp_book_sales_multiplier = 1.97  # per KU book, how much money do we make
 profit_per_ebook = 2.71
 kenp_pages_per_book = 450
 
@@ -12,7 +14,7 @@ analysis_ranges = [
     ('2025-04-13', '2025-04-19'),
     ('2025-04-20', '2025-04-26'),
     ('2025-04-27', '2025-05-03'),
-    ('2025-05-02', '2025-05-09')  # <-- Add more date ranges here
+    ('2025-05-04', '2025-05-10')  # <-- Add more date ranges here
 ]
 
 # Clean out old Per_Ad_Performance_Tracker data
@@ -24,6 +26,10 @@ per_ad_output_file = './Per_Ad_Performance_Tracker.xlsx'
 if os.path.exists(per_ad_output_file):
     os.remove(per_ad_output_file)
     print(f"Deleted old {per_ad_output_file} to start fresh.")
+plotting_file = './Ad_Book_Plotting_Tracker.xlsx'
+if os.path.exists(plotting_file):
+    os.remove(plotting_file)
+    print(f"Deleted old {plotting_file} to start fresh.")
 
 for start_date_input, end_date_input in analysis_ranges:
     try:
@@ -120,11 +126,11 @@ for start_date_input, end_date_input in analysis_ranges:
         print("Attribution data columns:", attr_all_data.columns.tolist())
         exit(1)
 
-    if (0):
-        # Warn about unmapped Ad groups
-        unmapped = attr_all_data[~attr_all_data['Ad group'].isin(mapping_data['Ad Name (FB)'])]['Ad group'].unique()
+    debug_unmapped_check = True
+    if debug_unmapped_check:
+        unmapped = attr_all_data[~attr_all_data['Ad group'].isin(mapping_data['Ad group'])]['Ad group'].unique()
         if len(unmapped) > 0:
-            print("WARNING: The following Ad groups from Attribution did not map to any FB Ad Name:")
+            print("WARNING: The following Ad groups from Attribution did not map to any Mapping entry:")
             for ad in unmapped:
                 print(f" - {ad}")
 
@@ -154,10 +160,19 @@ for start_date_input, end_date_input in analysis_ranges:
     # Load Combined Sales sheet to track sales per book
     combined_sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
     combined_sales_data['Royalty Date'] = pd.to_datetime(combined_sales_data['Royalty Date'], errors='coerce')
+    kenp_sales_data = pd.read_excel(sales_file, sheet_name='KENP')
+    kenp_sales_data['Date'] = pd.to_datetime(kenp_sales_data['Date'], errors='coerce')
+
+    # Filter only Amazon.com sales
+    combined_sales_data = combined_sales_data[combined_sales_data['Marketplace'] == 'Amazon.com']
+    kenp_sales_data = kenp_sales_data[kenp_sales_data['Marketplace'] == 'Amazon.com']
+
     weekly_book_sales = combined_sales_data[(combined_sales_data['Royalty Date'] >= start_date) & (combined_sales_data['Royalty Date'] <= end_date)]
+    weekly_kenp_sales = kenp_sales_data[(kenp_sales_data['Date'] >= start_date) & (kenp_sales_data['Date'] <= end_date)]
 
     # Aggregate sales per book for the week
     book_sales_summary = weekly_book_sales.groupby('Title').agg({'Net Units Sold': 'sum', 'Royalty': 'sum'}).reset_index()
+    kenp_summary = weekly_kenp_sales.groupby('Title').agg({'KENP': 'sum'}).reset_index()
 
     print('Weekly book sales summary:')
 
@@ -168,10 +183,11 @@ for start_date_input, end_date_input in analysis_ranges:
         linked_books = row['books']
 
         sales_for_ad = book_sales_summary[book_sales_summary['Title'].apply(lambda t: any(book in str(t) for book in linked_books))].agg({'Net Units Sold': 'sum', 'Royalty': 'sum'}).fillna(0)
+        kenp_for_ad = kenp_summary[kenp_summary['Title'].apply(lambda t: any(book in str(t) for book in linked_books))].agg({'KENP': 'sum'}).fillna(0)
 
         ad_book_sales.append({
             'Ad Name (FB)': ad_name,
-            'Total Linked Book Units Sold': sales_for_ad['Net Units Sold'],
+            'Total Linked Book Units Sold': sales_for_ad['Net Units Sold'] + kenp_for_ad['KENP'] / kenp_pages_per_book,
             'Total Linked Book Royalty': sales_for_ad['Royalty']
         })
 
@@ -181,12 +197,22 @@ for start_date_input, end_date_input in analysis_ranges:
     ad_book_sales_df = ad_book_sales_df[ad_book_sales_df['Total Linked Book Units Sold'] > 0]
     print('Weekly Ad-Book Sales Summary:')
 
-    # Build correlation dataset entry for this week
+    # Build dataset entry for plotting
     ad_book_sales_df['Week'] = f"{start_date.date()} to {end_date.date()}"
-    ad_book_sales_df['Click-throughs'] = ad_book_sales_df['Ad Name (FB)'].map(fb_data.set_index('Ad name')['Results']).fillna(0)
+    ad_book_sales_df['FB_Clicks'] = ad_book_sales_df['Ad Name (FB)'].map(fb_data.set_index('Ad name')['Results']).fillna(0)
+    ad_book_sales_df['Click-throughs'] = ad_book_sales_df['FB_Clicks']
+
+    # Append to plotting dataset
+    try:
+        existing_plot = pd.read_excel(plotting_file)
+        ad_book_combined_plot = pd.concat([existing_plot, ad_book_sales_df], ignore_index=True)
+    except FileNotFoundError:
+        ad_book_combined_plot = ad_book_sales_df
+
+    ad_book_combined_plot.to_excel(plotting_file, index=False)
+    print(f"Ad-Book plotting data saved to {plotting_file}")
 
     # Append to correlation dataset
-    correlation_file = './Ad_Book_Correlation_Tracker.xlsx'
     try:
         existing_corr = pd.read_excel(correlation_file)
         ad_book_combined = pd.concat([existing_corr, ad_book_sales_df], ignore_index=True)
@@ -197,11 +223,12 @@ for start_date_input, end_date_input in analysis_ranges:
     print(f"Ad-Book correlation data saved to {correlation_file}")
     print(ad_book_sales_df)
     print(book_sales_summary)
-    sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
-    sales_data['Royalty Date'] = pd.to_datetime(sales_data['Royalty Date'], errors='coerce')
-    sales_data = sales_data[(sales_data['Royalty Date'] >= start_date) & (sales_data['Royalty Date'] <= end_date)]
-    sales_units = sales_data['Net Units Sold'].sum()
-    sales_royalties = sales_data['Royalty'].sum()
+    #sales_data = pd.read_excel(sales_file, sheet_name='Combined Sales')
+    #sales_data['Royalty Date'] = pd.to_datetime(sales_data['Royalty Date'], errors='coerce')
+    #sales_data = sales_data[(sales_data['Royalty Date'] >= start_date) & (sales_data['Royalty Date'] <= end_date)]
+    sales_units = weekly_book_sales['Net Units Sold'].sum()
+    sales_kenp = weekly_kenp_sales['KENP'].sum() / kenp_pages_per_book
+    sales_royalties = weekly_book_sales['Royalty'].sum() + sales_kenp * kenp_book_sales_multiplier
 
     # Merge with FB per-ad spend and clicks
     fb_per_ad = fb_data[['Ad name', 'Results', 'Amount spent (USD)']]
@@ -305,3 +332,54 @@ if os.path.exists(correlation_file):
 
     combined.to_excel(output_file, index=False)
     print(f"Summary appended to {output_file}")
+
+# Plotting Section
+plotting_file = './Ad_Book_Plotting_Tracker.xlsx'
+if os.path.exists(plotting_file):
+    plot_data = pd.read_excel(plotting_file)
+
+    # Ensure plots directory exists
+    os.makedirs('./plots', exist_ok=True)
+
+    # Plot FB Clicks per Ad per Week
+    plt.figure(figsize=(12, 6))
+    for ad_name in plot_data['Ad Name (FB)'].unique():
+        ad_data = plot_data[plot_data['Ad Name (FB)'] == ad_name]
+        plt.plot(ad_data['Week'], ad_data['FB_Clicks'], marker='o', label=ad_name)
+
+    plt.title('FB Clicks per Ad per Week')
+    plt.xlabel('Week')
+    plt.ylabel('FB Clicks')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('./plots/FB_Clicks_per_Ad.png')
+    plt.close()
+
+    # Plot Linked Book Sales per Ad per Week
+    plt.figure(figsize=(12, 6))
+    for ad_name in plot_data['Ad Name (FB)'].unique():
+        ad_data = plot_data[plot_data['Ad Name (FB)'] == ad_name]
+        plt.plot(ad_data['Week'], ad_data['Total Linked Book Units Sold'], marker='o', label=ad_name)
+
+    plt.title('Linked Book Sales per Ad per Week')
+    plt.xlabel('Week')
+    plt.ylabel('Units Sold')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('./plots/Linked_Book_Sales_per_Ad.png')
+    plt.close()
+
+    # Combined Comparison Plot
+    melted = plot_data.melt(id_vars=['Ad Name (FB)', 'Week'], value_vars=['FB_Clicks', 'Total Linked Book Units Sold'], var_name='Metric', value_name='Count')
+
+    plt.figure(figsize=(12, 6))
+    sns.lineplot(data=melted, x='Week', y='Count', hue='Ad Name (FB)', style='Metric', markers=True, dashes=False)
+    plt.title('FB Clicks vs Book Sales per Ad')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('./plots/FB_vs_Book_Sales_per_Ad.png')
+    plt.close()
+
+    print("Plots saved in ./plots folder")
